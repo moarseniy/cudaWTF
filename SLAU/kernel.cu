@@ -11,6 +11,7 @@
 
 cusparseHandle_t handle;
 
+cudaEvent_t start, stop;
 
 cusparseMatDescr_t descrA = 0;
 cusparseMatDescr_t descr_L = 0;
@@ -88,8 +89,12 @@ int main(void)
     
     cusparseCreate(&handle);
 
-    const int Nrows = 4;    //kolvo strok                  
-    const int Ncols = 4;    //kolvo stolbcov                      
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    float gpuTime = 0.0;
+
+    const int Nrows = 2000;    //kolvo strok                  
+    const int Ncols = Nrows;    //kolvo stolbcov                      
     const int N = Nrows;
 
     
@@ -175,7 +180,7 @@ int main(void)
     for (int i = 0; i < nnz; ++i) 
         printf("h_ind[%i] = %i \n", i, h_ind[i]);
     
-   
+    cudaEventRecord(start, 0);
     
     setUpLU(descr_L, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ONE, CUSPARSE_FILL_MODE_LOWER, CUSPARSE_DIAG_TYPE_UNIT);
     setUpLU(descr_U, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ONE, CUSPARSE_FILL_MODE_UPPER, CUSPARSE_DIAG_TYPE_NON_UNIT);   
@@ -184,20 +189,12 @@ int main(void)
 
     analysisLU(info_A, info_L, info_U, handle, N, nnz, descrA, descr_L, descr_U, d_A, d_ptr, d_ind, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_SOLVE_POLICY_NO_LEVEL,CUSPARSE_SOLVE_POLICY_USE_LEVEL, pBuffer);
     
-    /* PARASHA
-    double* d_A1;
-    double* h_A1 = (double*)malloc(nnz * sizeof(double));
-    cudaMalloc(&d_A1, nnz * sizeof(*d_A1));
-    cudaMemcpy(h_A1, d_A, nnz * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(d_A1, h_A1, nnz * sizeof(double), cudaMemcpyHostToDevice);
-    for (int i = 0; i < nnz; i++)
-        printf("%lf ", h_A1[i]);*/
-
-
     //A = L * U 
-    computeSparseLU(info_A, handle, N, nnz, descrA, d_A, d_ptr, d_ind, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);//TUT OSHIBKA GDE TO!!!!!!!!!!!!!!!!!!!!!!!
+    
+    computeSparseLU(info_A, handle, N, nnz, descrA, d_A, d_ptr, d_ind, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
     
 
+    printf("\n LU= \n");
     double* d_ztest = (double*)malloc(nnz * sizeof(*d_ztest));
     cudaMemcpy(d_ztest, d_A, nnz * sizeof(double), cudaMemcpyDeviceToHost);
     for (int i = 0; i < nnz; i++)
@@ -212,6 +209,11 @@ int main(void)
    
     cusparseDcsrsv2_solve(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, N, nnz, &alpha, descr_L, d_A, d_ptr, d_ind, info_L, d_x, d_z, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
     
+    printf("\n Z=\n");
+    double* d_ztest1 = (double*)malloc(N * sizeof(*d_ztest));
+    cudaMemcpy(d_ztest1, d_z, N * sizeof(double), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < N; i++)
+        printf("%lf ", d_ztest1[i]);
     
 
     printf("\n");
@@ -225,12 +227,17 @@ int main(void)
 
     //resultat
     double* h_y = (double*)malloc(Ncols * sizeof(*h_y));
-    cudaMemcpy(h_y, d_y, N * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_x, d_y, N * sizeof(double), cudaMemcpyDeviceToHost);
 
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&gpuTime, start, stop);
+    printf("GPU time = %.4f \n", gpuTime);
+    
     printf("\n\nRESULTAT\n");
 
     for (int k = 0; k < N; k++) 
-        printf("x[%i] = %f\n", k, h_y[k]);
+        printf("x[%i] = %f\n", k, h_x[k]);
 
     cudaFree(pBuffer);
     cusparseDestroyMatDescr(descrA);
